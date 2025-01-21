@@ -1,0 +1,11 @@
+Примеры символов монет:
+BTCUSDT - Биткоин к Tether (USDT)
+ETHUSDT - Эфириум к Tether (USDT)
+BNBUSDT - Binance Coin к Tether (USDT)
+ADAUSDT - Cardano к Tether (USDT)
+XRPUSDT - Ripple к Tether (USDT)
+SOLUSDT - Solana к Tether (USDT)
+DOGEUSDT - Dogecoin к Tether (USDT)
+DOTUSDT - Polkadot к Tether (USDT)
+MATICUSDT - Polygon к Tether (USDT)
+SHIBUSDT - Shiba Inu к Tether (USDT)
