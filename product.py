@@ -3,8 +3,8 @@ from pybit.unified_trading import HTTP
 from dotenv import load_dotenv
 from pyngrok import ngrok
 import requests
-import os
 import logging
+import os
 
 # Загрузка переменных окружения
 load_dotenv()
@@ -16,13 +16,15 @@ app = Flask(__name__)
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Telegram токен и chat_id из переменных окружения
+# Telegram токен из переменных окружения
 TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
-CHAT_ID = os.getenv('CHAT_ID')
 
-if not TELEGRAM_BOT_TOKEN or not CHAT_ID:
-    logger.error("TELEGRAM_BOT_TOKEN или CHAT_ID не заданы. Проверьте файл .env.")
+if not TELEGRAM_BOT_TOKEN:
+    logger.error("TELEGRAM_BOT_TOKEN не задан. Проверьте файл .env.")
     exit(1)
+
+# Жестко заданный список chat_id
+CHAT_IDS = [1395854084, 525006772]
 
 # Ваши ключи API из переменных окружения
 key = os.getenv("API_KEY")
@@ -37,15 +39,18 @@ session = HTTP(api_key=key, api_secret=secret, testnet=False)
 
 # Функция отправки сообщений в Telegram
 def send_message_to_telegram(message):
-    url = f'https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage'
-    payload = {'chat_id': CHAT_ID, 'text': message}
-    try:
-        response = requests.post(url, json=payload)
-        response.raise_for_status()
-        return response.ok
-    except requests.RequestException as e:
-        logger.error(f"Ошибка при отправке сообщения в Telegram: {e}")
-        return False
+    success = True
+    for chat_id in CHAT_IDS:
+        url = f'https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage'
+        payload = {'chat_id': chat_id, 'text': message}
+        try:
+            response = requests.post(url, json=payload)
+            response.raise_for_status()
+            logger.info(f"Сообщение отправлено в чат {chat_id}")
+        except requests.RequestException as e:
+            logger.error(f"Ошибка при отправке сообщения в чат {chat_id}: {e}")
+            success = False
+    return success
 
 # Форматирование книги ордеров
 def format_order_book(response):

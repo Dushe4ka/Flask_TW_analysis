@@ -9,3 +9,4 @@ DOGEUSDT - Dogecoin к Tether (USDT)
 DOTUSDT - Polkadot к Tether (USDT)
 MATICUSDT - Polygon к Tether (USDT)
 SHIBUSDT - Shiba Inu к Tether (USDT)
+
