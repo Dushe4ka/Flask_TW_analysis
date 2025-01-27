@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Трейдинг Бот</title>
+</head>
+<body>
+    <h1>Трейдинг Бот</h1>
+
+    <!-- Открытие рыночного ордера -->
+    <h3>Открытие рыночного ордера</h3>
+    <form method="POST" action="/open_order">
+        <label for="symbol">Символ:</label>
+        <input type="text" id="symbol" name="symbol" required>
+        <br>
+        <label for="side">Направление:</label>
+        <select id="side" name="side" required>
+            <option value="Buy">Лонг</option>
+            <option value="Sell">Шорт</option>
+        </select>
+        <br>
+        <button type="submit">Открыть ордер</button>
+    </form>
+
+    <!-- Закрытие всех ордеров -->
+    <h3>Закрытие всех ордеров</h3>
+    <form method="POST" action="/close_all_orders">
+        <label for="symbol">Символ:</label>
+        <input type="text" id="symbol" name="symbol" required>
+        <br>
+        <button type="submit">Закрыть все ордера</button>
+    </form>
+
+    <!-- Закрытие конкретного ордера -->
+    <h3>Закрытие конкретного ордера</h3>
+    <form method="POST" action="/close_order">
+        <label for="symbol">Символ:</label>
+        <input type="text" id="symbol" name="symbol" required>
+        <br>
+        <label for="order_id">ID ордера:</label>
+        <input type="text" id="order_id" name="order_id" required>
+        <br>
+        <button type="submit">Закрыть ордер</button>
+    </form>
+
+    <!-- Настройки -->
+    <h3>Текущие настройки</h3>
+    <p>Сумма контракта: {{ settings.position_amount }}</p>
+    <p>Тейк-профит: {{ settings.take_profit }}</p>
+    <p>Стоп-лосс: {{ settings.stop_loss }}</p>
+</body>
+</html>
