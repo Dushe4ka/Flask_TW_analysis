@@ -192,9 +192,9 @@ def open_position_with_trailing_stop(symbol, side, dollar_value, retracement_per
 if __name__ == "__main__":
     # Параметры сделки
     symbol = "ACHUSDT"
-    side = "Sell"
-    dollar_value = 10
-    retracement_percent = 5 # Опционально
+    side = "Buy"
+    dollar_value = 6
+    retracement_percent = 2 # Опционально
 
     logger.info(f"Запуск программы для открытия позиции {symbol}.")
     open_position_with_trailing_stop(symbol, side, dollar_value, retracement_percent)
