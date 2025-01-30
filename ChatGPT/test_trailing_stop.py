@@ -1,3 +1,4 @@
+import time
 import logging
 import os
 from dotenv import load_dotenv
@@ -11,7 +12,7 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("BybitTrailingStopBot")
 
-# Ваши ключи API
+# Получение API-ключей
 key = os.getenv("API_KEY")
 secret = os.getenv("API_SECRET")
 
@@ -24,51 +25,86 @@ session = HTTP(api_key=key, api_secret=secret, testnet=False, recv_window=60000)
 
 
 def get_current_price(symbol):
-    """Получение текущей цены символа."""
+    """Получает текущую цену символа."""
     try:
         response = session.get_tickers(category="linear", symbol=symbol)
         if response.get("retCode") == 0:
-            result = response.get("result", {}).get("list", [])
-            for ticker in result:
-                if ticker.get("symbol") == symbol:
-                    return float(ticker.get("lastPrice", 0))
-        logger.error(f"Ошибка получения цены {symbol}: {response.get('retMsg')}")
+            return float(response["result"]["list"][0]["lastPrice"])
     except Exception as e:
-        logger.error(f"Ошибка при получении цены {symbol}: {e}")
+        logger.error(f"Ошибка получения цены {symbol}: {e}")
     return 0
 
 
-def is_position_open(symbol):
-    """Проверка, есть ли открытая позиция по символу."""
+def get_min_qty_and_step(symbol):
+    """Получает минимальное количество и шаг изменения для символа."""
     try:
-        response = session.get_positions(category="linear", symbol=symbol)
+        response = session.get_instruments_info(category="linear", symbol=symbol)
         if response.get("retCode") == 0:
-            positions = response.get("result", {}).get("list", [])
-            for position in positions:
-                if position.get("symbol") == symbol and float(position.get("size", 0)) > 0:
-                    logger.info(f"Позиция по {symbol} уже открыта.")
-                    return True
-        return False
+            instrument = response["result"]["list"][0]
+            return float(instrument["lotSizeFilter"]["minOrderQty"]), float(instrument["lotSizeFilter"]["qtyStep"])
     except Exception as e:
-        logger.error(f"Ошибка при проверке позиции по {symbol}: {e}")
-        return False
+        logger.error(f"Ошибка получения данных {symbol}: {e}")
+    return 1, 1  # Значения по умолчанию
 
 
-def set_trailing_stop(symbol, side, qty, entry_price, retracement_percent):
-    """Установка трейлинг-стопа с использованием встроенной логики Bybit."""
+def round_qty(qty, step):
+    """Округляет количество до ближайшего шага."""
+    return round(qty - (qty % step), len(str(step).split('.')[1]))
+
+
+def get_position(symbol):
+    """Получает текущую открытую позицию и ждет обновления в API."""
     try:
-        # Расчет расстояния отката (Trailing Stop)
-        trailing_stop_value = entry_price * (retracement_percent / 100)
+        for _ in range(5):  # Пытаемся 5 раз получить данные (с задержкой)
+            response = session.get_positions(category="linear", symbol=symbol)
+            if response.get("retCode") == 0:
+                positions = response["result"]["list"]
+                for position in positions:
+                    if float(position["size"]) > 0:
+                        logger.info(f"Позиция найдена: {position}")
+                        return position
+            time.sleep(2)  # Ждем обновления API
+    except Exception as e:
+        logger.error(f"Ошибка получения позиции {symbol}: {e}")
+    return None
 
-        # Направление триггера
-        if side == "Buy":
-            trigger_direction = 2  # Триггер активируется при снижении цены
-        elif side == "Sell":
-            trigger_direction = 1  # Триггер активируется при росте цены
+
+def open_position_manage(symbol, side, dollar_value, trailing_stop_percent=2):
+    """Открывает позицию с трейлинг-стопом."""
+    try:
+        entry_price = get_current_price(symbol)
+        if entry_price <= 0:
+            raise ValueError("Не удалось получить текущую цену.")
+
+        min_qty, qty_step = get_min_qty_and_step(symbol)
+        qty = round_qty(dollar_value / entry_price, qty_step)
+        qty = max(qty, min_qty)
+
+        response = session.place_order(
+            category="linear",
+            symbol=symbol,
+            side=side.capitalize(),
+            orderType="Market",
+            qty=str(qty),
+            timeInForce="IOC"
+        )
+
+        if response.get("retCode") == 0:
+            logger.info(f"Открыта позиция {side} {qty} {symbol} по {entry_price}")
+            send_message_to_telegram(f"Открыта позиция {side} {qty} {symbol} по {entry_price}")
+            set_trailing_stop(symbol, side, entry_price, trailing_stop_percent)
         else:
-            raise ValueError(f"Некорректное значение side: {side}")
+            logger.error(f"Ошибка открытия позиции: {response.get('retMsg')}")
+    except Exception as e:
+        logger.error(f"Ошибка при открытии позиции: {e}")
 
-        # Установка трейлинг-стопа
+
+def set_trailing_stop(symbol, side, entry_price, trailing_stop_percent):
+    """Устанавливает трейлинг-стоп."""
+    try:
+        trailing_stop_value = entry_price * (trailing_stop_percent / 100)
+        trigger_direction = 2 if side == "Buy" else 1
+
         response = session.set_trading_stop(
             category="linear",
             symbol=symbol,
@@ -78,91 +114,94 @@ def set_trailing_stop(symbol, side, qty, entry_price, retracement_percent):
         )
 
         if response.get("retCode") == 0:
-            logger.info(f"Трейлинг-стоп для {symbol} успешно установлен.")
-            send_message_to_telegram(f"Трейлинг-стоп для {symbol} успешно установлен.")
+            logger.info(f"Установлен трейлинг-стоп {trailing_stop_percent}% для {symbol}")
         else:
             logger.error(f"Ошибка установки трейлинг-стопа: {response.get('retMsg')}")
-            send_message_to_telegram(f"Ошибка установки трейлинг-стопа: {response.get('retMsg')}")
     except Exception as e:
-        logger.error(f"Ошибка при установке трейлинг-стопа: {e}")
-        send_message_to_telegram(f"Ошибка при установке трейлинг-стопа: {e}")
+        logger.error(f"Ошибка установки трейлинг-стопа: {e}")
 
 
-def get_min_qty_and_step(symbol):
-    """Получение минимального количества и шага изменения для символа."""
+def update_trailing_stop(symbol, move_to_entry_at=1, follow_distance=1):
+    """Обновляет трейлинг-стоп только при росте прибыли на 1% и корректно работает для Buy и Sell."""
     try:
-        response = session.get_instruments_info(category="linear", symbol=symbol)
-        if response.get("retCode") == 0:
-            instruments = response.get("result", {}).get("list", [])
-            for instrument in instruments:
-                if instrument.get("symbol") == symbol:
-                    lot_size_filter = instrument.get("lotSizeFilter", {})
-                    min_qty = float(lot_size_filter.get("minOrderQty", 1))
-                    qty_step = float(lot_size_filter.get("qtyStep", 1))
-                    return min_qty, qty_step
-        logger.error(f"Ошибка получения данных для {symbol}: {response.get('retMsg')}")
-    except Exception as e:
-        logger.error(f"Ошибка при получении данных для {symbol}: {e}")
-    return 1, 1  # Значения по умолчанию
-
-def round_qty_to_step(qty, step):
-    """Округление количества до ближайшего кратного шага."""
-    return round(qty - (qty % step), len(str(step).split('.')[1]))
-
-def open_position_with_trailing_stop(symbol, side, dollar_value, retracement_percent):
-    """Открытие позиции с установкой трейлинг-стопа."""
-    try:
-        if is_position_open(symbol):
-            logger.warning(f"Позиция по {symbol} уже открыта. Новая позиция не будет открыта.")
+        time.sleep(2)  # Ждем обновления позиции в API
+        position = get_position(symbol)
+        if not position:
+            logger.warning(f"Нет открытой позиции по {symbol}, трейлинг-стоп не обновляется.")
             return
 
-        # Получение текущей цены
-        entry_price = get_current_price(symbol)
-        if entry_price <= 0:
-            raise ValueError("Не удалось получить текущую цену.")
+        entry_price = float(position.get("avgPrice", 0))
+        if entry_price == 0:
+            logger.error(f"API не вернул avgPrice (цену входа) для {symbol}")
+            return
 
-        # Расчет количества
-        qty = dollar_value / entry_price
+        side = position["side"]
+        highest_price = entry_price  # Для Buy — максимальная достигнутая цена
+        lowest_price = entry_price  # Для Sell — минимальная достигнутая цена
+        last_stop_price = None  # Изначально нет стоп-цены
 
-        # Получение минимального количества и шага
-        min_qty, qty_step = get_min_qty_and_step(symbol)
+        logger.info(f"Мониторинг трейлинг-стопа {symbol}, вход: {entry_price}")
 
-        # Проверка и корректировка количества
-        if qty < min_qty:
-            logger.warning(f"Рассчитанное количество {qty} меньше минимального {min_qty}. Корректируем.")
-            qty = min_qty
-        qty = round_qty_to_step(qty, qty_step)
-        logger.info(f"Итоговое количество для {symbol}: {qty}")
+        while True:
+            position = get_position(symbol)  # Проверяем, открыта ли позиция
+            if not position:
+                logger.info(f"Позиция {symbol} закрыта. Остановка трейлинг-стопа.")
+                break  # Выход из цикла, если позиция закрыта
 
-        # Открытие рыночного ордера
-        response = session.place_order(
-            category="linear",
-            symbol=symbol,
-            side=side.capitalize(),
-            orderType="Market",
-            qty=str(qty),
-            timeInForce="IOC",
-            reduceOnly=False
-        )
+            current_price = get_current_price(symbol)
+            if current_price <= 0:
+                logger.warning(f"Не удалось получить цену {symbol}")
+                continue
 
-        if response.get("retCode") == 0:
-            logger.info(f"Позиция {side} для {symbol} успешно открыта.")
-            send_message_to_telegram(f"Позиция {side} для {symbol} успешно открыта.")
-            set_trailing_stop(symbol, side, qty, entry_price, retracement_percent)
-        else:
-            logger.error(f"Ошибка открытия позиции: {response.get('retMsg')}")
-            send_message_to_telegram(f"Ошибка открытия позиции: {response.get('retMsg')}")
+            # Вычисляем процент прибыли
+            profit_percent = ((current_price - entry_price) / entry_price) * 100 if side == "Buy" else ((entry_price - current_price) / entry_price) * 100
+
+            if profit_percent >= move_to_entry_at:
+                # Логика для Buy и Sell:
+                if side == "Buy":
+                    highest_price = max(highest_price, current_price)  # Фиксируем новый максимум
+                    new_stop_price = highest_price * (1 - follow_distance / 100)  # Стоп-лосс идет вверх
+
+                elif side == "Sell":
+                    lowest_price = min(lowest_price, current_price)  # Фиксируем новый минимум
+                    new_stop_price = lowest_price * (1 + follow_distance / 100)  # Стоп-лосс идет вниз
+
+                # Проверка, что новый стоп-лосс выше текущего (для Buy) или ниже (для Sell)
+                if last_stop_price is not None:
+                    if side == "Buy" and new_stop_price <= last_stop_price:
+                        logger.warning(f"Пропущено обновление трейлинг-стопа: {new_stop_price} ниже предыдущего {last_stop_price}")
+                        continue
+                    if side == "Sell" and new_stop_price >= last_stop_price:
+                        logger.warning(f"Пропущено обновление трейлинг-стопа: {new_stop_price} выше предыдущего {last_stop_price}")
+                        continue
+
+                # Устанавливаем трейлинг-стоп
+                response = session.set_trading_stop(
+                    category="linear",
+                    symbol=symbol,
+                    stopLoss=str(new_stop_price),
+                    side=side.capitalize()
+                )
+
+                if response.get("retCode") == 0:
+                    logger.info(f"Обновлен трейлинг-стоп {symbol} на {new_stop_price}")
+                    last_stop_price = new_stop_price  # Обновляем стоп-цену
+                else:
+                    logger.error(f"Ошибка обновления стоп-лосса: {response.get('retMsg')}")
+
+            time.sleep(5)  # Пауза перед повторной проверкой
+
     except Exception as e:
-        logger.error(f"Ошибка при открытии позиции: {e}")
-        send_message_to_telegram(f"Ошибка при открытии позиции: {e}")
+        logger.error(f"Ошибка обновления трейлинг-стопа: {e}")
 
 
 if __name__ == "__main__":
-    # Параметры сделки
-    symbol = "spellusdt".upper()
-    side = "Buy"
+    symbol = "Jasmyusdt".upper()
+    side = "Sell"
     dollar_value = 6  # Сумма сделки
-    retracement_percent = 3  # Процент отката
+    trailing_stop_percent = 1  # Изначальный трейлинг-стоп 2%
 
-    logger.info(f"Запуск программы для открытия позиции {symbol}.")
-    open_position_with_trailing_stop(symbol, side, dollar_value, retracement_percent)
+    open_position_manage(symbol, side, dollar_value, trailing_stop_percent)
+
+    # Начинаем мониторинг цены и динамически обновляем стоп-лосс
+    update_trailing_stop(symbol, move_to_entry_at=1, follow_distance=1)

@@ -1,5 +1,5 @@
-import os
 import logging
+import os
 from dotenv import load_dotenv
 from pybit.unified_trading import HTTP
 from telegram_message import send_message_to_telegram
@@ -22,6 +22,7 @@ if not key or not secret:
 # Создание сессии API
 session = HTTP(api_key=key, api_secret=secret, testnet=False, recv_window=60000)
 
+
 def get_current_price(symbol):
     """Получение текущей цены символа."""
     try:
@@ -35,6 +36,7 @@ def get_current_price(symbol):
     except Exception as e:
         logger.error(f"Ошибка при получении цены {symbol}: {e}")
     return 0
+
 
 def is_position_open(symbol):
     """Проверка, есть ли открытая позиция по символу."""
@@ -51,54 +53,27 @@ def is_position_open(symbol):
         logger.error(f"Ошибка при проверке позиции по {symbol}: {e}")
         return False
 
-def calculate_activation_price(entry_price, retracement_percent, side):
-    """Расчет динамической цены активации на основе процента отката."""
-    if side == "Buy":
-        return entry_price * (1 + retracement_percent / 100)
-    elif side == "Sell":
-        return entry_price * (1 - retracement_percent / 100)
-    else:
-        raise ValueError(f"Некорректное значение side: {side}")
 
-def set_trailing_stop_by_percentage(symbol, side, qty, entry_price, retracement_percent):
-    """Установка трейлинг-стопа с учетом направления позиции (Buy/Sell)."""
+def set_trailing_stop(symbol, side, qty, entry_price, retracement_percent):
+    """Установка трейлинг-стопа с использованием встроенной логики Bybit."""
     try:
-        # Получение текущей рыночной цены
-        current_price = get_current_price(symbol)
-        if current_price <= 0:
-            raise ValueError("Не удалось получить текущую цену для трейлинг-стопа.")
+        # Расчет расстояния отката (Trailing Stop)
+        trailing_stop_value = entry_price * (retracement_percent / 100)
 
-        # Расчет расстояния отката
-        retracement_distance = current_price * (retracement_percent / 100)
-
-        # Логика для шорт-позиции (Sell) и лонг-позиции (Buy)
+        # Направление триггера
         if side == "Buy":
-            trigger_price = current_price - retracement_distance
-            trigger_direction = 2  # Триггер срабатывает при падении цены
+            trigger_direction = 2  # Триггер активируется при снижении цены
         elif side == "Sell":
-            trigger_price = current_price + retracement_distance
-            trigger_direction = 1  # Триггер срабатывает при росте цены
+            trigger_direction = 1  # Триггер активируется при росте цены
         else:
             raise ValueError(f"Некорректное значение side: {side}")
 
-        # Проверка триггерной цены
-        if (side == "Sell" and trigger_price <= current_price) or (side == "Buy" and trigger_price >= current_price):
-            raise ValueError(
-                f"Некорректная триггерная цена {trigger_price} для {side}-позиции при текущей цене {current_price}."
-            )
-
-        # Размещение трейлинг-стопа
-        response = session.place_order(
+        # Установка трейлинг-стопа
+        response = session.set_trading_stop(
             category="linear",
             symbol=symbol,
-            side="Sell" if side == "Buy" else "Buy",  # Закрытие позиции
-            orderType="Market",
-            qty=str(qty),
-            triggerBy="LastPrice",
-            reduceOnly=True,
-            closeOnTrigger=True,
-            triggerPrice=str(trigger_price),
-            trailingStop=str(retracement_distance),
+            side=side.capitalize(),
+            trailingStop=str(trailing_stop_value),
             triggerDirection=trigger_direction
         )
 
@@ -113,9 +88,8 @@ def set_trailing_stop_by_percentage(symbol, side, qty, entry_price, retracement_
         send_message_to_telegram(f"Ошибка при установке трейлинг-стопа: {e}")
 
 
-
 def get_min_qty_and_step(symbol):
-    """Получение минимального количества и шага количества для символа."""
+    """Получение минимального количества и шага изменения для символа."""
     try:
         response = session.get_instruments_info(category="linear", symbol=symbol)
         if response.get("retCode") == 0:
@@ -132,11 +106,11 @@ def get_min_qty_and_step(symbol):
     return 1, 1  # Значения по умолчанию
 
 def round_qty_to_step(qty, step):
-    """Округление количества до ближайшего допустимого шага."""
+    """Округление количества до ближайшего кратного шага."""
     return round(qty - (qty % step), len(str(step).split('.')[1]))
 
 def open_position_with_trailing_stop(symbol, side, dollar_value, retracement_percent):
-    """Открытие позиции с динамической ценой активации и установкой трейлинг-стопа."""
+    """Открытие позиции с установкой трейлинг-стопа."""
     try:
         if is_position_open(symbol):
             logger.warning(f"Позиция по {symbol} уже открыта. Новая позиция не будет открыта.")
@@ -174,13 +148,7 @@ def open_position_with_trailing_stop(symbol, side, dollar_value, retracement_per
         if response.get("retCode") == 0:
             logger.info(f"Позиция {side} для {symbol} успешно открыта.")
             send_message_to_telegram(f"Позиция {side} для {symbol} успешно открыта.")
-
-            # Динамический расчет цены активации
-            activation_price = calculate_activation_price(entry_price, retracement_percent, side)
-            logger.info(f"Цена активации для {symbol}: {activation_price}")
-
-            # Установка трейлинг-стопа
-            set_trailing_stop_by_percentage(symbol, side, qty, activation_price, retracement_percent)
+            set_trailing_stop(symbol, side, qty, entry_price, retracement_percent)
         else:
             logger.error(f"Ошибка открытия позиции: {response.get('retMsg')}")
             send_message_to_telegram(f"Ошибка открытия позиции: {response.get('retMsg')}")
@@ -191,10 +159,10 @@ def open_position_with_trailing_stop(symbol, side, dollar_value, retracement_per
 
 if __name__ == "__main__":
     # Параметры сделки
-    symbol = "ACHUSDT"
+    symbol = "spellusdt".upper()
     side = "Buy"
-    dollar_value = 6
-    retracement_percent = 2 # Опционально
+    dollar_value = 6  # Сумма сделки
+    retracement_percent = 3  # Процент отката
 
     logger.info(f"Запуск программы для открытия позиции {symbol}.")
     open_position_with_trailing_stop(symbol, side, dollar_value, retracement_percent)

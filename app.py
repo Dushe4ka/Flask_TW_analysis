@@ -9,11 +9,11 @@ import time
 from threading import Thread
 from datetime import datetime, timedelta
 # from open_order_tekprofit_stoploss import open_position_with_protection
-from ChatGPT.test_trailing_stop import open_position_with_trailing_stop
+from ChatGPT.test_trailing_stop import open_position_manage, update_trailing_stop
 
 # Параметры для открытия ордера
-dollar_value = 10
-retracement_percent = 2
+dollar_value = 6
+retracement_percent = 1
 # stop_loss_percent = 1
 # take_profit_percent = 1
 
@@ -117,7 +117,7 @@ def analyze_order_book(symbol):
             if is_trade_open:
                 logger.info("Ожидание закрытия позиции.")
                 while not is_position_closed(symbol):
-                    time.sleep(10)  # Ждём 10 секунд перед повторной проверкой
+                    time.sleep(5)  # Ждём 10 секунд перед повторной проверкой
                 is_trade_open = False
                 logger.info("Позиция закрыта. Анализ продолжается.")
 
@@ -154,7 +154,7 @@ def analyze_order_book(symbol):
                 open_position(symbol, "Buy")
                 is_trade_open = True
 
-            time.sleep(10)
+            time.sleep(5)
 
         logger.info(f"Анализ для символа {symbol} завершен. Условия не выполнены.")
         send_message_to_telegram(f"Анализ для монеты {symbol} завершен. Условия не выполнены.")
@@ -167,7 +167,8 @@ def analyze_order_book(symbol):
 # Функция открытия позиции
 def open_position(symbol, side):
     try:
-        open_position_with_trailing_stop(symbol, side, dollar_value, retracement_percent)
+        open_position_manage(symbol, side, dollar_value, retracement_percent)
+        update_trailing_stop(symbol, move_to_entry_at=1, follow_distance=1)
         logger.info(f"Позиция {side} для {symbol} успешно открыта.")
     except Exception as e:
         logger.error(f"Ошибка при открытии позиции для {symbol}: {e}")
