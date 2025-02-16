@@ -109,7 +109,8 @@ def is_position_closed(symbol):
 # Основной анализ
 def analyze_order_book(symbol):
     global is_trade_open
-    end_time = datetime.now() + timedelta(hours=1)
+    # end_time = datetime.now() + timedelta(hours=1)
+    end_time = datetime.now() + timedelta(minutes=15)
     logger.info(f"Начат анализ для символа {symbol}. Время окончания: {end_time}")
     send_message_to_telegram(f"Начат анализ для монеты {symbol}. Время окончания: {end_time.strftime('%H:%M:%S')}")
 
@@ -118,7 +119,7 @@ def analyze_order_book(symbol):
             if is_trade_open:
                 logger.info("Ожидание закрытия позиции.")
                 while not is_position_closed(symbol):
-                    time.sleep(5)  # Ждём 10 секунд перед повторной проверкой
+                    time.sleep(5)  # Ждём 5 секунд перед повторной проверкой
                 is_trade_open = False
                 logger.info("Позиция закрыта. Анализ продолжается.")
 
@@ -146,14 +147,14 @@ def analyze_order_book(symbol):
 
             logger.info(f"Символ: {symbol}, Биды: {bid_percentage:.2f}%, Аски: {ask_percentage:.2f}%.")
 
-            if bid_percentage > 85:
+            if bid_percentage > 70:
                 send_message_to_telegram(f"Биды {bid_percentage} для {symbol}. Открытие позиции SELL.")
-                open_position(symbol, "Sell")
-                is_trade_open = True
-            elif ask_percentage > 85:
+                # open_position(symbol, "Sell")
+                # is_trade_open = True
+            elif ask_percentage > 70:
                 send_message_to_telegram(f"Аски {ask_percentage} для {symbol}. Открытие позиции BUY.")
-                open_position(symbol, "Buy")
-                is_trade_open = True
+                # open_position(symbol, "Buy")
+                # is_trade_open = True
 
             time.sleep(5)
 
